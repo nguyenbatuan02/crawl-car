@@ -8,9 +8,9 @@ import os
 
 class PartsouqHTMLSaver:
     def __init__(self):
-        # Setup undetected Chrome để bypass Cloudflare
+        # Setup undetected Chrome 
         options = uc.ChromeOptions()
-        # options.add_argument('--headless=new')  # Uncomment để chạy ngầm
+        # options.add_argument('--headless=new')  
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
         options.add_argument('--window-size=1920,1080')
@@ -21,6 +21,14 @@ class PartsouqHTMLSaver:
         # Tạo thư mục lưu HTML
         self.html_folder = 'html_sources'
         os.makedirs(self.html_folder, exist_ok=True)
+        
+        # Thư mục backup
+        self.backup_folder = 'backups'
+        os.makedirs(self.backup_folder, exist_ok=True)
+        
+        # Tracking folder đã dùng để tránh trùng
+        self.used_folders = {}
+        self.current_model_folder = None  # Track folder hiện tại của model
     
     def load_json(self, filename):
         """Load data from JSON file"""
@@ -31,7 +39,52 @@ class PartsouqHTMLSaver:
         """Save data to JSON file"""
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        print(f"💾 Đã lưu index file: {filename}")
+        print(f"✅ Đã lưu file: {filename}")
+    
+    def save_backup(self, data, brand_name, car_type_idx, model_idx):
+        """Lưu backup sau mỗi model"""
+        safe_brand = self._safe_filename(brand_name)
+        
+        backup_filename = f"{safe_brand}_CarType{car_type_idx}_Model{model_idx}.json"
+        backup_path = os.path.join(self.backup_folder, backup_filename)
+        
+        self.save_json(data, backup_path)
+        print(f"💾 BACKUP: {backup_path}")
+    
+    def set_current_model_folder(self, brand, car_type, model):
+        """Set folder cho model hiện tại - gọi 1 lần khi bắt đầu model mới"""
+        base_model_folder = os.path.join(
+            self.html_folder,
+            self._safe_filename(brand),
+            self._safe_filename(car_type),
+            self._safe_filename(model)
+        )
+        
+        # Check unique và lưu lại
+        self.current_model_folder = self._get_unique_folder(base_model_folder)
+        print(f"  📁 Model folder: {self.current_model_folder}")
+    
+    def _get_unique_folder(self, base_path):
+        """Tạo tên thư mục unique nếu bị trùng - CHỈ CHECK 1 LẦN"""
+        # Nếu chưa xử lý path này bao giờ
+        if base_path not in self.used_folders:
+            # Check xem folder có tồn tại không
+            if not os.path.exists(base_path):
+                # Chưa tồn tại -> dùng tên gốc
+                self.used_folders[base_path] = base_path
+                return base_path
+            else:
+                # Đã tồn tại -> tìm số tiếp theo
+                counter = 1
+                while True:
+                    new_path = f"{base_path}{counter}"
+                    if not os.path.exists(new_path):
+                        self.used_folders[base_path] = new_path
+                        return new_path
+                    counter += 1
+        
+        # Đã xử lý rồi -> trả về kết quả đã lưu
+        return self.used_folders[base_path]
     
     def _safe_filename(self, name):
         """Chuyển tên thành tên file an toàn"""
@@ -48,30 +101,33 @@ class PartsouqHTMLSaver:
     def save_html(self, url, brand, car_type, model, category, title):
         """Truy cập URL, lưu HTML VÀ crawl parts"""
         try:
-            print(f"          🌐 Đang truy cập: {url}")
+            print(f"      🌐 Đang truy cập: {url}")
             self.driver.get(url)
             
             # Chờ Cloudflare
+            print(f"      ⏳ Chờ Cloudflare...")
             time.sleep(3)
             
             # Wait for page load
+            print(f"      ⏳ Chờ load trang...")
             wait = WebDriverWait(self.driver, 15)
             wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".table-bordered-1")))
             
             # Lấy HTML source
             html_content = self.driver.page_source
             
-            # Tạo thư mục theo cấu trúc
+            # Dùng folder đã set sẵn cho model hiện tại
+            if not self.current_model_folder:
+                raise Exception("Chưa set current_model_folder! Gọi set_current_model_folder() trước.")
+            
+            # Tạo đường dẫn đầy đủ: brand/car_type/model/category
             folder_path = os.path.join(
-                self.html_folder,
-                self._safe_filename(brand),
-                self._safe_filename(car_type),
-                self._safe_filename(model),
+                self.current_model_folder,
                 self._safe_filename(category)
             )
             os.makedirs(folder_path, exist_ok=True)
             
-            # Tạo tên file
+            # Tạo tên file: brand/car_type/model/category/title.html
             filename = self._safe_filename(title) + '.html'
             filepath = os.path.join(folder_path, filename)
             
@@ -81,25 +137,39 @@ class PartsouqHTMLSaver:
             
             # Return đường dẫn tương đối
             relative_path = os.path.relpath(filepath, '.')
-            print(f"          ✅ HTML: {relative_path}")
+            print(f"      📄 HTML: {relative_path}")
             
             # CRAWL PARTS DATA
+            print(f"      🔧 Đang parse parts...")
             parts = self._parse_parts()
-            print(f"          ✅ Parts: {len(parts)} items")
+            print(f"      ✅ Parts: {len(parts)} items")
             
             return relative_path, parts
             
         except Exception as e:
-            print(f"          ❌ Lỗi: {e}")
+            print(f"      ❌ Lỗi save_html: {e}")
+            import traceback
+            traceback.print_exc()
             return None, []
     
     def _parse_parts(self):
         """Parse parts từ trang hiện tại"""
         try:
             parts = []
-            rows = self.driver.find_elements(By.CSS_SELECTOR, ".table-bordered-1 tbody tr.part-search-tr")
             
-            for row in rows:
+            # Tìm bảng parts
+            try:
+                rows = self.driver.find_elements(By.CSS_SELECTOR, ".table-bordered-1 tbody tr.part-search-tr")
+                print(f"    🔍 Tìm thấy {len(rows)} rows")
+            except Exception as e:
+                print(f"    ⚠️  Không tìm thấy table: {e}")
+                return []
+            
+            if not rows:
+                print(f"    ⚠️  Không có rows nào!")
+                return []
+            
+            for idx, row in enumerate(rows, 1):
                 try:
                     cells = row.find_elements(By.TAG_NAME, "td")
                     
@@ -124,22 +194,31 @@ class PartsouqHTMLSaver:
                             "quantity": quantity,
                             "range": range_val
                         })
-                except:
+                    else:
+                        print(f"    ⚠️  Row {idx} có {len(cells)} cells (cần ít nhất 6)")
+                        
+                except Exception as e:
+                    print(f"    ⚠️  Lỗi parse row {idx}: {e}")
                     continue
             
             return parts
-        except:
+            
+        except Exception as e:
+            print(f"    ❌ Lỗi _parse_parts: {e}")
+            import traceback
+            traceback.print_exc()
             return []
     
     def save_all_html_from_json(self, input_file, output_file):
         """Lưu HTML cho tất cả URLs trong JSON VÀ cập nhật cấu trúc JSON gốc"""
-        print("="*80)
-        print("🚀 BẮT ĐẦU LƯU HTML + CRAWL PARTS")
-        print("="*80)
         
         # Load JSON data
-        print(f"\n📂 Đang đọc file: {input_file}")
         data = self.load_json(input_file)
+        
+        # Copy sang file output ngay từ đầu (để không động vào file gốc)
+        if input_file != output_file:
+            self.save_json(data, output_file)
+            print(f"✅ Đã copy {input_file} → {output_file}")
         
         total_saved = 0
         total_failed = 0
@@ -148,30 +227,41 @@ class PartsouqHTMLSaver:
         # Loop through brands
         for brand in data:
             brand_name = brand['brand']
-            print(f"\n🏢 Brand: {brand_name}")
+            print(f"\n{'='*60}")
+            print(f"🏢 Brand: {brand_name}")
+            print(f"{'='*60}")
             
             # Loop through car types
-            for car_type in brand.get('car_types', []):
+            for car_type_idx, car_type in enumerate(brand.get('car_types', []), 1):
                 car_type_name = car_type['car_type']
-                print(f"\n  📦 Car Type: {car_type_name}")
+                print(f"\n{'─'*60}")
+                print(f"🚗 Car Type [{car_type_idx}]: {car_type_name}")
+                print(f"{'─'*60}")
+                
+                car_type_start_time = time.time()
                 
                 # Loop through models
-                for model in car_type.get('models', []):
+                for model_idx, model in enumerate(car_type.get('models', []), 1):
                     model_name = model['model']
-                    print(f"\n    🚙 Model: {model_name}")
+                    print(f"\n  📦 Model [{model_idx}]: {model_name}")
+                    
+                    # SET FOLDER CHO MODEL NÀY - CHỈ 1 LẦN
+                    self.set_current_model_folder(brand_name, car_type_name, model_name)
+                    
+                    model_start_time = time.time()
                     
                     # Loop through categories
                     for category in model.get('categories', []):
                         category_name = category['category']
-                        print(f"\n      📁 Category: {category_name}")
-                        print(f"         Titles: {len(category.get('titles', []))}")
+                        print(f"\n    📁 Category: {category_name}")
+                        print(f"    📋 Titles: {len(category.get('titles', []))}")
                         
                         # Loop through titles
                         for idx, title in enumerate(category.get('titles', []), 1):
                             title_name = title['title']
                             title_url = title['url']
                             
-                            print(f"\n        [{idx}/{len(category['titles'])}] ⚙️  {title_name}")
+                            print(f"\n      [{idx}/{len(category['titles'])}] 📝 {title_name}")
                             
                             # Lưu HTML VÀ crawl parts
                             html_file, parts = self.save_html(
@@ -184,7 +274,6 @@ class PartsouqHTMLSaver:
                             )
                             
                             if html_file:
-                                # CẬP NHẬT VÀO CẤU TRÚC GỐC
                                 title['html_file'] = html_file
                                 title['parts'] = parts
                                 total_saved += 1
@@ -193,18 +282,26 @@ class PartsouqHTMLSaver:
                                 title['html_file'] = None
                                 title['parts'] = []
                                 total_failed += 1
+                    
+                    # BACKUP SAU MỖI MODEL
+                    model_elapsed = time.time() - model_start_time
+                    print(f"\n  ⏱️  Hoàn thành Model {model_name} trong {model_elapsed/60:.1f} phút")
+                    self.save_backup(data, brand_name, car_type_idx, model_idx)
+                    
+                    # Lưu output file chính
+                    self.save_json(data, output_file)
+                
+                # Tổng kết car type
+                car_type_elapsed = time.time() - car_type_start_time
+                print(f"\n✅ Hoàn thành Car Type {car_type_name} trong {car_type_elapsed/60:.1f} phút")
         
-        # Save updated data (GIỮ NGUYÊN CẤU TRÚC GỐC)
-        print(f"\n{'='*80}")
-        print(f"✅ HOÀN THÀNH")
-        print(f"{'='*80}")
-        print(f"📊 Tổng số HTML đã lưu: {total_saved}")
-        print(f"📊 Tổng số parts đã crawl: {total_parts}")
-        print(f"📊 Tổng số thất bại: {total_failed}")
-        
-        self.save_json(data, output_file)
-        print(f"📂 File output: {output_file}")
-        print(f"📂 Thư mục HTML: {self.html_folder}/")
+        # Summary
+        print(f"\n{'='*60}")
+        print(f"📊 TỔNG KẾT:")
+        print(f"   ✅ HTML đã lưu: {total_saved}")
+        print(f"   🔧 Parts đã crawl: {total_parts}")
+        print(f"   ❌ Thất bại: {total_failed}")
+        print(f"{'='*60}")
     
     def close(self):
         """Close browser"""
@@ -216,22 +313,21 @@ if __name__ == "__main__":
     saver = PartsouqHTMLSaver()
     
     try:
-        # Input: file JSON có titles và URLs
-        input_file = "Toyota_Progress_CT1.json"
+        # QUAN TRỌNG: Đặt tên output khác input để không ghi đè file gốc!
+        input_file = "Infiniti_Complete.json"
+        output_file = "Infiniti.json"  # File mới, không động file gốc
         
-        # Output: file JSON index mapping URL -> HTML file
-        index_file = "Toyota_HTML_Index.json"
+        print(f"📥 Input: {input_file}")
+        print(f"📤 Output: {output_file}")
+        print(f"💾 Backup: backups/")
+        print("="*60)
         
         # Lưu HTML cho tất cả URLs
-        saver.save_all_html_from_json(input_file, index_file)
+        saver.save_all_html_from_json(input_file, output_file)
         
     except Exception as e:
-        print(f"\n❌ Lỗi: {e}")
         import traceback
         traceback.print_exc()
         
     finally:
-        print("\n🔒 Đóng browser...")
         saver.close()
-    
-    print("\n✨ HOÀN THÀNH!")
