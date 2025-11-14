@@ -153,58 +153,98 @@ class PartsouqHTMLSaver:
             return None, []
     
     def _parse_parts(self):
-        """Parse parts từ trang hiện tại"""
+        """Parse parts """
         try:
             parts = []
             
-            # Tìm bảng parts
-            try:
-                rows = self.driver.find_elements(By.CSS_SELECTOR, ".table-bordered-1 tbody tr.part-search-tr")
-                print(f"    🔍 Tìm thấy {len(rows)} rows")
-            except Exception as e:
-                print(f"    ⚠️  Không tìm thấy table: {e}")
+            # Tìm table
+            tables = self.driver.find_elements(By.CSS_SELECTOR, ".table-bordered-1")
+            if not tables:
+                print("     ⚠️  Không tìm thấy table parts")
                 return []
+            
+            table = tables[0]
+            
+            # ===== BƯỚC 1: ĐỌC HEADERS =====
+            try:
+                headers = table.find_elements(By.CSS_SELECTOR, "thead tr th")
+                header_names = []
+                
+                for h in headers:
+                    header_text = h.text.strip()
+                    if header_text:
+                        # Chuẩn hóa tên thành snake_case
+                        safe_name = header_text.lower().replace(' ', '').replace('-', '')
+                        safe_name = safe_name.replace('/', '_').replace('(', '').replace(')', '')
+                        header_names.append(safe_name)
+                    else:
+                        header_names.append(f"col_{len(header_names)}")  # Cột không có tên
+                
+                print(f"     📋 Headers ({len(header_names)} cột): {header_names}")
+                
+                if not header_names:
+                    print("     ❌ Không có headers!")
+                    return []
+                
+            except Exception as e:
+                print(f"     ❌ Lỗi đọc headers: {e}")
+                return []
+            
+            # ===== BƯỚC 2: PARSE ROWS =====
+            rows = table.find_elements(By.CSS_SELECTOR, "tbody tr.part-search-tr")
             
             if not rows:
-                print(f"    ⚠️  Không có rows nào!")
-                return []
+                all_rows = table.find_elements(By.CSS_SELECTOR, "tbody tr")
+                rows = [row for row in all_rows if not row.find_elements(By.TAG_NAME, "th")]
             
-            for idx, row in enumerate(rows, 1):
+            print(f"     🔍 Tìm thấy {len(rows)} rows")
+            
+            for row_idx, row in enumerate(rows, 1):
                 try:
                     cells = row.find_elements(By.TAG_NAME, "td")
                     
-                    if len(cells) >= 6:
-                        # Extract part number
-                        number_cell = cells[0]
-                        number_link = number_cell.find_elements(By.TAG_NAME, "a")
-                        number = number_link[0].text.strip() if number_link else number_cell.text.strip()
+                    if len(cells) < 1:
+                        continue
+                    
+                    # ===== TẠO DICT THEO ĐÚNG TÊN CỘT =====
+                    part_data = {}
+                    
+                    for col_idx, cell in enumerate(cells):
+                        # Lấy tên cột tương ứng
+                        if col_idx < len(header_names):
+                            field_name = header_names[col_idx]
+                        else:
+                            field_name = f"col_{col_idx}"
                         
-                        # Extract other data
-                        name = cells[1].text.strip()
-                        code = cells[2].text.strip()
-                        note = cells[3].text.strip()
-                        quantity = cells[4].text.strip()
-                        range_val = cells[5].text.strip()
+                        # Lấy giá trị - ưu tiên link
+                        links = cell.find_elements(By.TAG_NAME, "a")
+                        if links:
+                            value = links[0].text.strip()
+                        else:
+                            value = cell.text.strip()
                         
-                        parts.append({
-                            "number": number,
-                            "name": name,
-                            "code": code,
-                            "note": note,
-                            "quantity": quantity,
-                            "range": range_val
-                        })
-                    else:
-                        print(f"    ⚠️  Row {idx} có {len(cells)} cells (cần ít nhất 6)")
+                        # Chỉ lưu nếu có giá trị
+                        if value:
+                            part_data[field_name] = value
+                    
+                    # Lưu part (cần ít nhất 1 field)
+                    if part_data:
+                        parts.append(part_data)
                         
+                        # Log sample
+                        if row_idx == 1:
+                            print(f"     ✅ Sample: {part_data}")
+                    
                 except Exception as e:
-                    print(f"    ⚠️  Lỗi parse row {idx}: {e}")
+                    if row_idx <= 2:
+                        print(f"     ⚠️  Lỗi row {row_idx}: {e}")
                     continue
             
+            print(f"     ✅ Crawled {len(parts)} parts")
             return parts
             
         except Exception as e:
-            print(f"    ❌ Lỗi _parse_parts: {e}")
+            print(f"     ❌ Lỗi parse parts: {e}")
             import traceback
             traceback.print_exc()
             return []
