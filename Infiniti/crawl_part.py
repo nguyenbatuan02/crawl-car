@@ -282,7 +282,7 @@ class PartsouqHTMLSaver:
                 
                 # Loop through models
                 for model_idx, model in enumerate(car_type.get('models', []), 1):
-                    model_name = model['model']
+                    model_name = model['name']
                     print(f"\n  📦 Model [{model_idx}]: {model_name}")
                     
                     # SET FOLDER CHO MODEL NÀY - CHỈ 1 LẦN
