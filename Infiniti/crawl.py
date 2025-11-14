@@ -7,9 +7,9 @@ import time
 
 class PartsouqCrawler:
     def __init__(self):
-        # Setup undetected Chrome để bypass Cloudflare
+        # Setup undetected Chrome 
         options = uc.ChromeOptions()
-        # options.add_argument('--headless=new')  # Uncomment để chạy ngầm
+        # options.add_argument('--headless=new')  
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
         options.add_argument('--window-size=1920,1080')
@@ -19,13 +19,12 @@ class PartsouqCrawler:
         
     def get_all_brands(self):
         """Crawl all brand links from homepage"""
-        print("🔍 Đang crawl danh sách brands...")
+        print("Crawl danh sách brands...")
         
         try:
             self.driver.get(self.base_url)
             
-            # Chờ Cloudflare check xong
-            print("⏳ Đang chờ Cloudflare check... (có thể mất 5-10s)")
+            # Chờ Cloudflare check
             time.sleep(8)
             
             # Wait for brand container
@@ -46,40 +45,65 @@ class PartsouqCrawler:
                         "href": brand_href
                     })
                     
-                    print(f"✅ Found: {brand_name} - {brand_href}")
+                    print(f"Found: {brand_name} - {brand_href}")
                     
                 except Exception as e:
-                    print(f"⚠️ Lỗi khi parse brand: {e}")
+                    print(f"Lỗi khi parse brand: {e}")
                     continue
             
             return brands
             
         except Exception as e:
-            print(f"❌ Lỗi khi crawl brands: {e}")
+            print(f"Lỗi khi crawl brands: {e}")
             return []
     
+   
     def get_car_types(self, brand_url):
         """Get all car types/models for a brand"""
-        print(f"\n🚗 Đang crawl car types từ: {brand_url}")
+        print(f"\ncrawl car types từ: {brand_url}")
         
         try:
             self.driver.get(brand_url)
-            
-            # Chờ Cloudflare check
-            print("  ⏳ Đang chờ Cloudflare...")
             time.sleep(6)
             
-            # Wait for panel to load
             wait = WebDriverWait(self.driver, 20)
             wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".panel-heading")))
+            
+            # ===== THÊM ĐOẠN NÀY: MỞ TẤT CẢ PANELS =====
+            print("Đang mở tất cả panels...")
+            
+            # Tìm tất cả nút collapse (có icon chevron)
+            collapse_buttons = self.driver.find_elements(
+                By.CSS_SELECTOR, 
+                "a[data-toggle='collapse'], a.accordion-toggle[role='button']"
+            )
+            
+            print(f"Tìm thấy {len(collapse_buttons)} panels có thể mở")
+            
+            # Click mở từng panel
+            for idx, button in enumerate(collapse_buttons):
+                try:
+                    # Kiểm tra panel đã mở chưa
+                    parent = button.find_element(By.XPATH, "./ancestor::div[@class='panel panel-default']")
+                    panel_body = parent.find_elements(By.CSS_SELECTOR, ".panel-collapse.collapse.in")
+                    
+                    if not panel_body:  # Nếu chưa mở
+                        self.driver.execute_script("arguments[0].click();", button)
+                        time.sleep(0.3)  # Đợi animation
+                        
+                except Exception as e:
+                    continue
+            
+            print("Đã mở xong tất cả panels!\n")
+            # ===== KẾT THÚC ĐOẠN MỞ PANELS =====
             
             car_types = []
             seen_urls = set()
             
-            # Tìm tất cả links có href chứa '/catalog/genuine/pick'
+            # Tìm tất cả links (PHẢI TÌM LẠI SAU KHI MỞ PANELS)
             all_links = self.driver.find_elements(By.CSS_SELECTOR, "a[href*='/catalog/genuine/pick']")
             
-            print(f"  🔍 Tìm thấy {len(all_links)} links...")
+            print(f"Tìm thấy {len(all_links)} links")
             
             for link in all_links:
                 try:
@@ -95,7 +119,7 @@ class PartsouqCrawler:
                         })
                         
                         seen_urls.add(car_href)
-                        print(f"  ✅ {car_type}")
+                        print(f"{car_type}")
                         
                 except Exception as e:
                     continue
@@ -103,88 +127,144 @@ class PartsouqCrawler:
             return car_types
             
         except Exception as e:
-            print(f"  ❌ Lỗi khi crawl car types: {e}")
-            try:
-                self.driver.save_screenshot("error_screenshot.png")
-                print("  📸 Đã lưu screenshot lỗi: error_screenshot.png")
-            except:
-                pass
+            print(f"Lỗi khi crawl car types: {e}")
             return []
-    
+
     def get_models(self, car_type_url):
         """Get all models for a car type"""
-        print(f"\n    🔧 Đang crawl models từ: {car_type_url}")
+        print(f"\ncrawl models từ: {car_type_url}")
         
         try:
             self.driver.get(car_type_url)
-            
-            # Chờ Cloudflare
-            print("      ⏳ Đang chờ Cloudflare...")
             time.sleep(5)
             
-            # Wait for table to load
             wait = WebDriverWait(self.driver, 20)
             wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".search-result-vin")))
             
             models = []
             seen_urls = set()
             
-            # Tìm tất cả rows trong table (bỏ qua header row)
-            rows = self.driver.find_elements(By.CSS_SELECTOR, ".search-result-vin tbody tr:not(:first-child)")
+            # Tìm TẤT CẢ tables (có thể có nhiều table với cấu trúc khác nhau)
+            tables = self.driver.find_elements(By.CSS_SELECTOR, ".search-result-vin table")
             
-            print(f"      🔍 Tìm thấy {len(rows)} models...")
+            print(f"Tìm thấy {len(tables)} table(s)")
             
-            for row in rows:
+            for table_idx, table in enumerate(tables, 1):
+                print(f"\n  📋 Table #{table_idx}:")
+                
                 try:
-                    cells = row.find_elements(By.TAG_NAME, "td")
-                    if len(cells) >= 5:
-                        name = cells[0].text.strip()
-                        description = cells[1].text.strip()
-                        model = cells[2].text.strip()
-                        options = cells[3].text.strip()
-                        prod_period = cells[4].text.strip()
-                        
-                        # Lấy URL từ Model column
-                        model_link = cells[2].find_element(By.TAG_NAME, "a")
-                        model_url = model_link.get_attribute("href")
-                        
-                        if model and model_url and model_url not in seen_urls:
-                            models.append({
-                                "name": name,
-                                "description": description,
-                                "model": model,
-                                "options": options,
-                                "prod_period": prod_period,
-                                "url": model_url
-                            })
+                    # Lấy header để xác định cấu trúc
+                    headers = table.find_elements(By.CSS_SELECTOR, "thead tr th, tbody tr:first-child th")
+                    header_texts = [h.text.strip() for h in headers]
+                    
+                    print(f"     Headers: {header_texts}")
+                    
+                    # Xác định VỊ TRÍ CỘT dựa trên header
+                    name_col = -1
+                    year_col = -1
+                    engine_col = -1
+                    gearbox_col = -1
+                    
+                    for idx, header in enumerate(header_texts):
+                        if "Name" in header:
+                            name_col = idx
+                        elif "Model Year" in header or "Model_year" in header:
+                            year_col = idx
+                        elif "Engine" in header:
+                            engine_col = idx
+                        elif "Gearbox" in header or "Transmission" in header:
+                            gearbox_col = idx
+                    
+                    print(f"     Vị trí: Name={name_col}, Year={year_col}, Engine={engine_col}, Gearbox={gearbox_col}")
+                    
+                    # Lấy tất cả data rows (bỏ qua header)
+                    rows = table.find_elements(By.CSS_SELECTOR, "tbody tr")
+                    data_rows = []
+                    for row in rows:
+                        if row.find_elements(By.TAG_NAME, "th"):
+                            continue  # Bỏ qua header row
+                        data_rows.append(row)
+                    
+                    print(f"     {len(data_rows)} data rows")
+                    
+                    # Parse từng row
+                    for row in data_rows:
+                        try:
+                            cells = row.find_elements(By.TAG_NAME, "td")
                             
-                            seen_urls.add(model_url)
-                            print(f"      ✅ {model} - {description}")
+                            # Kiểm tra đủ cells
+                            if name_col >= len(cells) or year_col >= len(cells):
+                                continue
                             
+                            # Lấy Name
+                            name_cell = cells[name_col]
+                            name_link = name_cell.find_element(By.TAG_NAME, "a")
+                            name = name_link.text.strip()
+                            model_url = name_link.get_attribute("href")
+                            
+                            # Lấy Model Year
+                            year_cell = cells[year_col]
+                            model_year = year_cell.text.strip()
+                            
+                            # Lấy Engine (nếu có)
+                            engine = ""
+                            if engine_col >= 0 and engine_col < len(cells):
+                                engine = cells[engine_col].text.strip()
+                            
+                            # Lấy Gearbox (nếu có)
+                            gearbox = ""
+                            if gearbox_col >= 0 and gearbox_col < len(cells):
+                                gearbox = cells[gearbox_col].text.strip()
+                            
+                            if name and model_url and model_url not in seen_urls:
+                                model_data = {
+                                    "name": name,
+                                    "model_year": model_year,
+                                    "url": model_url
+                                }
+                            
+                                # Thêm thông tin optional
+                                if engine:
+                                    model_data["engine"] = engine
+                                if gearbox:
+                                    model_data["gearbox"] = gearbox
+                                
+                                models.append(model_data)
+                                seen_urls.add(model_url)
+                                
+                                # In ra
+                                info = f"{name} ({model_year})"
+                                if engine:
+                                    info += f" | {engine[:30]}..."
+                                print(f"       ✅ {info}")
+                                
+                        except Exception as e:
+                            print(f"       ❌ Lỗi parse row: {e}")
+                            continue
+                    
                 except Exception as e:
-                    print(f"      ⚠️ Lỗi parse row: {e}")
+                    print(f"     ❌ Lỗi parse table: {e}")
                     continue
-            
+        
+            print(f"\n  📊 Tổng: {len(models)} models")
             return models
             
         except Exception as e:
-            print(f"      ❌ Lỗi khi crawl models: {e}")
+            print(f"❌ Lỗi khi crawl models: {e}")
             try:
                 self.driver.save_screenshot("error_models.png")
-                print("      📸 Đã lưu screenshot: error_models.png")
             except:
                 pass
             return []
     
     def get_categories_and_titles(self, model_url):
         """Get all categories and their titles/diagrams"""
-        print(f"\n      🗂️  Đang crawl categories từ: {model_url}")
+        print(f"\n crawl categories từ: {model_url}")
         
         try:
             self.driver.get(model_url)
             
             # Chờ Cloudflare
-            print("        ⏳ Đang chờ Cloudflare...")
             time.sleep(5)
             
             # Wait for page to load
@@ -193,12 +273,12 @@ class PartsouqCrawler:
             
             categories = []
             
-            # BƯỚC 1: Crawl DEFAULT CATEGORY (Engine/Fuel/Tool) - đang hiển thị
+            # BƯỚC 1: Crawl DEFAULT CATEGORY 
             try:
                 default_category_name = self.driver.find_element(By.CSS_SELECTOR, "h2.current-category").text.strip()
                 default_category_name = default_category_name.replace(" Diagrams", "").strip()
                 
-                print(f"        📁 Default Category: {default_category_name}")
+                print(f"Default Category: {default_category_name}")
                 
                 # Crawl titles đang hiển thị
                 default_titles = self.get_titles_only()
@@ -209,17 +289,17 @@ class PartsouqCrawler:
                     "titles": default_titles
                 })
                 
-                print(f"            ✅ {len(default_titles)} titles found")
+                print(f"{len(default_titles)} titles found")
                 
             except Exception as e:
-                print(f"        ⚠️ Không crawl được default category: {e}")
+                print(f"Không crawl được default category: {e}")
             
             # BƯỚC 2: Thu thập danh sách CHILD CATEGORIES
             category_info_list = []
             seen_urls = set()
             
             category_rows = self.driver.find_elements(By.CSS_SELECTOR, ".vehicle-tg tbody tr")
-            print(f"        🔍 Tìm thấy {len(category_rows)} rows trong sidebar")
+            print(f"Tìm thấy {len(category_rows)} rows trong sidebar")
             
             for idx, row in enumerate(category_rows):
                 try:
@@ -238,25 +318,25 @@ class PartsouqCrawler:
                                 "url": category_url
                             })
                             seen_urls.add(category_url)
-                            print(f"        ✅ Found Category: {category_name}")
+                            print(f"Found Category: {category_name}")
                     else:
                         # Row không có link - parent category
                         try:
                             cell_text = row.find_element(By.TAG_NAME, "td").text.strip()
                             if cell_text:
-                                print(f"        📂 Parent: {cell_text}")
+                                print(f"Parent: {cell_text}")
                         except:
                             pass
                         
                 except Exception as e:
-                    print(f"        ⚠️ Lỗi parse row {idx}: {e}")
+                    print(f"Lỗi parse row {idx}: {e}")
                     continue
             
-            print(f"        ✅ Tổng số child categories: {len(category_info_list)}")
+            print(f"Tổng số child categories: {len(category_info_list)}")
             
             # BƯỚC 3: Crawl titles cho từng child category
             for idx, cat_info in enumerate(category_info_list, 1):
-                print(f"\n        [{idx}/{len(category_info_list)}] 📁 Crawling: {cat_info['name']}")
+                print(f"\n        [{idx}/{len(category_info_list)}]  Crawling: {cat_info['name']}")
                 
                 # Navigate to category
                 self.driver.get(cat_info['url'])
@@ -271,15 +351,14 @@ class PartsouqCrawler:
                     "titles": titles
                 })
                 
-                print(f"            ✅ {len(titles)} titles found")
+                print(f"{len(titles)} titles found")
             
             return categories
         
         except Exception as e:
-            print(f"      ❌ Lỗi khi crawl categories: {e}")
+            print(f"Lỗi khi crawl categories: {e}")
             try:
                 self.driver.save_screenshot("error_categories.png")
-                print("      📸 Đã lưu screenshot: error_categories.png")
             except:
                 pass
             return []
@@ -296,7 +375,7 @@ class PartsouqCrawler:
             # Find all diagram thumbnails
             thumbnails = self.driver.find_elements(By.CSS_SELECTOR, ".thumbnail")
             
-            print(f"            🔍 Tìm thấy {len(thumbnails)} thumbnails")
+            print(f"Tìm thấy {len(thumbnails)} thumbnails")
             
             for thumb in thumbnails:
                 try:
@@ -312,7 +391,7 @@ class PartsouqCrawler:
                         })
                         
                         seen_urls.add(title_url)
-                        print(f"            ⚙️  {title_text}")
+                        print(f"{title_text}")
                         
                 except Exception as e:
                     continue
@@ -320,35 +399,32 @@ class PartsouqCrawler:
             return titles
             
         except Exception as e:
-            print(f"          ❌ Lỗi khi crawl titles: {e}")
+            print(f"Lỗi khi crawl titles: {e}")
             return []
     
-    def save_to_json(self, data, filename="Infiniti_title.json"):
+    def save_to_json(self, data, filename="Nissan_title.json"):
         """Save data to JSON file"""
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        print(f"\n💾 Đã lưu vào file: {filename}")
+        print(f"\n Đã lưu vào file: {filename}")
     
     def close(self):
         """Close browser"""
         self.driver.quit()
 
 
-# Main execution - CRAWL 1 BRAND (TẤT CẢ TITLES)
+# Main execution
 if __name__ == "__main__":
     crawler = PartsouqCrawler()
     
-    # ⚙️ CẤU HÌNH: Chọn brand cần crawl
-    TARGET_BRAND = "Infiniti"  # Đổi tên brand ở đây
+    
+    TARGET_BRAND = "chevrolet"  # Đổi tên ở đây
     
     try:
-        print("="*80)
-        print(f"🚀 BẮT ĐẦU CRAWL BRAND: {TARGET_BRAND} - TẤT CẢ TITLES")
-        print("="*80)
         
         # Step 1: Get all brands
         brands = crawler.get_all_brands()
-        print(f"\n📊 Tổng số brands: {len(brands)}")
+        print(f"\n Tổng số brands: {len(brands)}")
         
         # Step 2: Tìm brand cần crawl
         target_brand_data = None
@@ -358,28 +434,28 @@ if __name__ == "__main__":
                 break
         
         if not target_brand_data:
-            print(f"\n❌ Không tìm thấy brand: {TARGET_BRAND}")
-            print(f"📋 Danh sách brands có sẵn:")
+            print(f"\nKhông tìm thấy brand: {TARGET_BRAND}")
+            print(f"Danh sách brands có sẵn:")
             for b in brands:
                 print(f"   - {b['brand']}")
         else:
-            print(f"\n✅ Tìm thấy brand: {target_brand_data['brand']}")
-            print(f"🔗 URL: {target_brand_data['href']}")
+            print(f"\n Tìm thấy brand: {target_brand_data['brand']}")
+            print(f" URL: {target_brand_data['href']}")
             
             # Step 3: Crawl TẤT CẢ car types
             car_types = crawler.get_car_types(target_brand_data['href'])
             target_brand_data['car_types'] = []
             
             if not car_types:
-                print(f"\n⚠️ Không tìm thấy car types cho {TARGET_BRAND}")
+                print(f"\n Không tìm thấy car types cho {TARGET_BRAND}")
                 crawler.save_to_json([target_brand_data], f"{TARGET_BRAND}_Complete.json")
             else:
-                print(f"\n📦 Tìm thấy {len(car_types)} car types")
+                print(f"\n Tìm thấy {len(car_types)} car types")
                 
                 # Crawl từng car type
                 for ct_idx, car_type in enumerate(car_types, 1):
                     print(f"\n{'='*60}")
-                    print(f"📦 [{ct_idx}/{len(car_types)}] Car Type: {car_type['car_type']}")
+                    print(f" [{ct_idx}/{len(car_types)}] Car Type: {car_type['car_type']}")
                     print(f"{'='*60}")
                     
                     try:
@@ -393,15 +469,15 @@ if __name__ == "__main__":
                         }
                         
                         if not models:
-                            print(f"  ⚠️ Không tìm thấy models")
+                            print(f"   Không tìm thấy models")
                             target_brand_data['car_types'].append(car_type_data)
                             continue
                         
-                        print(f"  🚙 Tìm thấy {len(models)} models")
+                        print(f"  Tìm thấy {len(models)} models")
                         
                         # Crawl TẤT CẢ models
                         for model_idx, model in enumerate(models, 1):
-                            print(f"\n  🚙 [{model_idx}/{len(models)}] Model: {model['model']}")
+                            print(f"\n   [{model_idx}/{len(models)}] Model: {model['name']}")
                             
                             try:
                                 # Get TẤT CẢ categories và titles
@@ -409,10 +485,6 @@ if __name__ == "__main__":
                                 
                                 model_data = {
                                     "name": model['name'],
-                                    "description": model['description'],
-                                    "model": model['model'],
-                                    "options": model['options'],
-                                    "prod_period": model['prod_period'],
                                     "url": model['url'],
                                     "categories": categories
                                 }
@@ -421,20 +493,20 @@ if __name__ == "__main__":
                                 
                                 # Thống kê
                                 total_titles = sum(len(cat['titles']) for cat in categories)
-                                print(f"    ✅ {len(categories)} categories, {total_titles} titles")
+                                print(f"  {len(categories)} categories, {total_titles} titles")
                                 
                             except Exception as e:
-                                print(f"    ❌ Lỗi crawl model {model['model']}: {e}")
+                                print(f"  Lỗi crawl model {model['model']}: {e}")
                                 continue
                         
                         target_brand_data['car_types'].append(car_type_data)
                         
                         # Backup sau mỗi car type
                         crawler.save_to_json([target_brand_data], f"{TARGET_BRAND}_Progress_CT{ct_idx}.json")
-                        print(f"\n  💾 Backup: {TARGET_BRAND}_Progress_CT{ct_idx}.json")
+                        print(f"\n  Backup: {TARGET_BRAND}_Progress_CT{ct_idx}.json")
                         
                     except Exception as e:
-                        print(f"  ❌ Lỗi crawl car type: {e}")
+                        print(f"  Lỗi crawl car type: {e}")
                         continue
                 
                 # Save final result
@@ -455,23 +527,17 @@ if __name__ == "__main__":
                     for cat in model['categories']
                 )
                 
-                print(f"\n{'='*80}")
-                print(f"✅ HOÀN THÀNH CRAWL: {TARGET_BRAND}")
-                print(f"{'='*80}")
-                print(f"📂 File: {TARGET_BRAND}_Complete.json")
-                print(f"📊 Thống kê:")
+                
                 print(f"   - Car Types: {total_car_types}")
                 print(f"   - Models: {total_models}")
                 print(f"   - Categories: {total_categories}")
                 print(f"   - Titles: {total_titles}")
         
     except Exception as e:
-        print(f"\n❌ Lỗi: {e}")
+        print(f"\n Lỗi: {e}")
         import traceback
         traceback.print_exc()
         
     finally:
-        print("\n🔒 Đóng browser...")
         crawler.close()
     
-    print("\n✨ HOÀN THÀNH!")
